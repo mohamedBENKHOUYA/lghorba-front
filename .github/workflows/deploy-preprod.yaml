@@ -1,0 +1,52 @@
+name: Deployment front preprod
+
+on:
+  push: 
+    branches: [dev]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: preprod
+    steps:
+      - name: checkout project from git
+        uses: actions/checkout@v2
+      
+      - name: npm install
+        run: npm i
+
+      - name: build project
+        run: npm run build
+
+      - name: Log in to docker hub registry
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+
+      - name: build docker image
+        run: docker build -t mo29172/lghorba_front:v${{ github.run_number }} -f ./docker/Dockerfile ./
+
+      - name: push image to docker hub
+        run: docker push mo29172/lghorba_front:v${{ github.run_number }}
+
+      - name: update front deploment file version
+        run: sed -i -e"s/:latest/:v${{ github.run_number }}/" docker/k8s/front-deployment.yaml
+
+      - name: copy k8s files via ssh
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.REMOTE_SSH_KEY }}
+          source: 'docker/k8s/front-deployment.yaml,docker/k8s/front-node-port-service.yaml'
+          target: '/srv/k8s/front'
+          strip_components: 2
+
+
+      - name: apply k8s files
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.SSH_SECOND_USER }}
+          password: ${{ secrets.REMOTE_PASSWORD }}
+          script: kubectl apply -f /srv/k8s/front
